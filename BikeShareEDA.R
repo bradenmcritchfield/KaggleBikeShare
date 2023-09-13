@@ -35,5 +35,3 @@ plot4 <- ggplot(data=bike, mapping=aes(x = datetime, y = count)) +
 ## Save and upload a png file of the 4 panel plot to LS (use export in the image panel)
 ##Git add/commit/push your EDA to GitHub
 
-
-
