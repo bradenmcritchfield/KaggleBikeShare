@@ -11,22 +11,49 @@ library(tidyverse)
 library(vroom)
 
 biketrain <- vroom("./train.csv")
+biketest <- vroom("./test.csv")
 
 ##Cleaning Step
   ##Recatergorize weather "4" value with "3" since there is only one occurence
   biketrain1 <- biketrain %>%
-    mutate(weather = ifelse(weather == 4, 3, weather))
+    mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+    select(1:9, 12) #remove casual and registered
 
 
 ##Engineering Step
+    #other variables
+    #would aggregating day windspeed/humidity/temperature help?
+    #night/day
+    
   library(tidymodels)
     my_recipe <- recipe(count ~ ., biketrain1)    %>%
       step_date(datetime, features = "dow") %>% #get day of week
       step_time(datetime, features = "hour") %>% #get hour
-      step_rm(casual)%>% #remove casual column
-      step_rm(registered) %>% #remove registered column
       step_zv(all_predictors()) %>% #remove any predictors with no variance
-      step_mutate(weather = as.factor(weather), season = as.factor(season))#turn weather and season into factors
+      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season))#turn weather and season into factors
     prepped_recipe <- prep(my_recipe)      
     bake(prepped_recipe, new_data = biketrain1)
+    
+#Linear Analysis
+    my_mod <- linear_reg() %>% #Type of model
+      set_engine("lm") # Engine = What R function to use
+  bike_workflow <- workflow() %>%
+    add_recipe(my_recipe) %>%
+    add_model(my_mod) %>%
+    fit(data = biketrain1) #Fit workflow
+  
+  bikepredictions <- predict(bike_workflow, new_data = biketest)
 
+  submission <- bikepredictions %>%
+    mutate(.pred = ifelse(.pred < 0, 0, .pred)) %>%
+    mutate(datetime = biketest$datetime) %>%
+    mutate(datetime=as.character(format(datetime)))  %>%
+    mutate(count = .pred) %>%
+    select(2, 3)
+  
+  submission <- cbind(biketest$datetime, bikepredictions)
+  submission$count <- submission$.pred
+  submission$datetime <- as.character(submission$datetime)
+
+  vroom_write(submission, "submission.csv", delim = ",")    
+  
