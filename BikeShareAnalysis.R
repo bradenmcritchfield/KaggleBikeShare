@@ -14,9 +14,8 @@ biketrain <- vroom("./train.csv")
 biketest <- vroom("./test.csv")
 
 ##Cleaning Step
-  ##Recatergorize weather "4" value with "3" since there is only one occurence
-  biketrain1 <- biketrain %>%
-    mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  ##Recatergorize weather "4" value with "3" since there is only one occurrence
+  biketrain <- biketrain %>%
     select(1:9, 12) #remove casual and registered
 
 
@@ -26,21 +25,27 @@ biketest <- vroom("./test.csv")
     #night/day
     
   library(tidymodels)
-    my_recipe <- recipe(count ~ ., biketrain1)    %>%
-      step_date(datetime, features = "dow") %>% #get day of week
+    my_recipe <- recipe(count ~ ., biketrain)    %>%
+    #  step_date(datetime, features = "dow") %>% #get day of week
       step_time(datetime, features = "hour") %>% #get hour
       step_zv(all_predictors()) %>% #remove any predictors with no variance
-      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season))#turn weather and season into factors
+      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) #%>% #turn weather and season into factors
+    ## add log of y
+      ##step_mutate(count = log(count))
     prepped_recipe <- prep(my_recipe)      
-    bake(prepped_recipe, new_data = biketrain1)
-    
+    bake(prepped_recipe, new_data = biketrain)
+
+#################    
 #Linear Analysis
+#################
     my_mod <- linear_reg() %>% #Type of model
       set_engine("lm") # Engine = What R function to use
   bike_workflow <- workflow() %>%
     add_recipe(my_recipe) %>%
     add_model(my_mod) %>%
-    fit(data = biketrain1) #Fit workflow
+    fit(data = biketrain) #Fit workflow
+  
+  extract_fit_engine(bike_workflow) %>% summary()
   
   bikepredictions <- predict(bike_workflow, new_data = biketest)
 
@@ -50,10 +55,34 @@ biketest <- vroom("./test.csv")
     mutate(datetime=as.character(format(datetime)))  %>%
     mutate(count = .pred) %>%
     select(2, 3)
-  
-  submission <- cbind(biketest$datetime, bikepredictions)
-  submission$count <- submission$.pred
-  submission$datetime <- as.character(submission$datetime)
 
   vroom_write(submission, "submission.csv", delim = ",")    
+  
+  
+  
+############################
+  #Poisson Regression Model
+############################
+  
+library(poissonreg)
+pois_mod <- poisson_reg() %>% #Type of model
+    set_engine("glm") # GLM = generalized linear model 45
+bike_pois_workflow <- workflow() %>%
+add_recipe(my_recipe) %>%
+add_model(pois_mod) %>%
+fit(data = biketrain) # Fit the workflow
+
+extract_fit_engine(bike_pois_workflow) %>% summary()
+
+bike_predictions <- predict(bike_pois_workflow,
+new_data=biketest) # Use fit to predict
+
+submission <- bike_predictions %>%
+  #mutate(.pred = exp(.pred)) %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = .pred) %>%
+  select(2, 3)
+
+vroom_write(submission, "submissionpoisson.csv", delim = ",")   
   
