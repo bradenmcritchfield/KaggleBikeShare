@@ -16,7 +16,8 @@ biketest <- vroom("./test.csv")
 ##Cleaning Step
   ##Recatergorize weather "4" value with "3" since there is only one occurrence
   biketrain <- biketrain %>%
-    select(1:9, 12) #remove casual and registered
+    select(1:9, 12) %>%
+    mutate(count = log(count)) #transform count to log scale
 
 
 ##Engineering Step
@@ -29,9 +30,7 @@ biketest <- vroom("./test.csv")
     #  step_date(datetime, features = "dow") %>% #get day of week
       step_time(datetime, features = "hour") %>% #get hour
       step_zv(all_predictors()) %>% #remove any predictors with no variance
-      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) #%>% #turn weather and season into factors
-    ## add log of y
-      ##step_mutate(count = log(count))
+      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season))# %>% #turn weather and season into factors
     prepped_recipe <- prep(my_recipe)      
     bake(prepped_recipe, new_data = biketrain)
 
@@ -81,8 +80,45 @@ submission <- bike_predictions %>%
   #mutate(.pred = exp(.pred)) %>%
   mutate(datetime = biketest$datetime) %>%
   mutate(datetime=as.character(format(datetime)))  %>%
-  mutate(count = .pred) %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
   select(2, 3)
 
 vroom_write(submission, "submissionpoisson.csv", delim = ",")   
-  
+
+
+###############################
+  #Penalized Regression
+###############################
+
+
+library(tidymodels)
+library(poissonreg)
+my_recipe <- recipe(count ~ ., biketrain)    %>%
+  #  step_date(datetime, features = "dow") %>% #get day of week
+  step_time(datetime, features = "hour") %>% #get hour
+  step_rm(datetime)%>%
+  step_zv(all_predictors()) %>% #remove any predictors with no variance
+  step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+prepped_recipe <- prep(my_recipe)      
+bake(prepped_recipe, new_data = biketrain)
+
+preg_model <- linear_reg(penalty=.25, mixture=0) %>% #Set model and tuning
+set_engine("glmnet") # Function to fit in R
+preg_wf <- workflow() %>%
+add_recipe(my_recipe) %>%
+add_model(preg_model) %>%
+fit(data=biketrain)
+bike_predictions_pen <- predict(preg_wf, new_data=biketest)
+
+submission <- bike_predictions_pen %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionpenalized.csv", delim = ",")   
+
+
+
