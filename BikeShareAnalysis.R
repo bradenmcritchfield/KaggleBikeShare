@@ -133,6 +133,7 @@ my_recipe <- recipe(count ~ ., biketrain)    %>%
   #  step_date(datetime, features = "dow") %>% #get day of week
   step_time(datetime, features = "hour") %>% #get hour
   step_rm(datetime)%>%
+  step_rm(temp) %>%
   step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
   step_dummy(all_nominal_predictors()) %>%
   step_normalize(all_numeric_predictors())%>%
