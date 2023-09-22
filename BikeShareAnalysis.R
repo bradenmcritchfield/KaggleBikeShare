@@ -30,9 +30,13 @@ biketest <- vroom("./test.csv")
     #  step_date(datetime, features = "dow") %>% #get day of week
       step_time(datetime, features = "hour") %>% #get hour
       step_zv(all_predictors()) %>% #remove any predictors with no variance
-      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season))# %>% #turn weather and season into factors
+      step_rm(atemp) %>%
+       #create interaction between season and weather
+      step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>%
+      step_interact(terms = ~ temp:daetime_hour) # %>% #turn weather and season into factors
     prepped_recipe <- prep(my_recipe)      
-    bake(prepped_recipe, new_data = biketrain)
+    DataExplorer::plot_correlation(bake(prepped_recipe, new_data = biketrain))
+    
 
 #################    
 #Linear Analysis
@@ -96,13 +100,13 @@ library(poissonreg)
 my_recipe <- recipe(count ~ ., biketrain)    %>%
   #  step_date(datetime, features = "dow") %>% #get day of week
   step_time(datetime, features = "hour") %>% #get hour
-  step_rm(datetime)%>%
-  step_zv(all_predictors()) %>% #remove any predictors with no variance
   step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
   step_dummy(all_nominal_predictors()) %>%
-  step_normalize(all_numeric_predictors())
+  step_normalize(all_numeric_predictors())%>%
+  step_zv(all_predictors())#remove any predictors with no variance
 prepped_recipe <- prep(my_recipe)      
 bake(prepped_recipe, new_data = biketrain)
+DataExplorer::plot_correlation(bake(prepped_recipe, new_data = biketrain))
 
 preg_model <- linear_reg(penalty=.25, mixture=0) %>% #Set model and tuning
 set_engine("glmnet") # Function to fit in R
@@ -119,6 +123,39 @@ submission <- bike_predictions_pen %>%
   select(2, 3)
 
 vroom_write(submission, "submissionpenalized.csv", delim = ",")   
+
+###################
+#Random Forest
+######################
+library(tidymodels)
+library(poissonreg)
+my_recipe <- recipe(count ~ ., biketrain)    %>%
+  #  step_date(datetime, features = "dow") %>% #get day of week
+  step_time(datetime, features = "hour") %>% #get hour
+  step_rm(datetime)%>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors())%>%
+  step_zv(all_predictors())#remove any predictors with no variance
+prepped_recipe <- prep(my_recipe)      
+bake(prepped_recipe, new_data = biketrain)
+DataExplorer::plot_correlation(bake(prepped_recipe, new_data = biketrain))
+
+rf_model <- rand_forest(mode="regression") %>% #Set model and tuning
+  set_engine("ranger") # Function to fit in R
+preg_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(rf_model) %>%
+  fit(data=biketrain)
+bike_predictions_pen <- predict(preg_wf, new_data=biketest)
+
+submission <- bike_predictions_pen %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionrf.csv", delim = ",")   
 
 
 
