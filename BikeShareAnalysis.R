@@ -159,4 +159,53 @@ submission <- bike_predictions_pen %>%
 vroom_write(submission, "submissionrf.csv", delim = ",")   
 
 
+################################################
+#Tuning Models
+###############################################
+library(tidymodels)
+library(poissonreg)
 
+
+#Penalized regression model
+preg_model <- linear_reg(penalty=tune(), mixture=tune()) %>% #Set model and tuning
+  set_engine("glmnet") # Function to fit in R
+
+#Set workflow
+preg_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(preg_model)
+
+##Grid of values to tune over
+tuning_grid <- grid_regular(penalty(), mixture(), levels = 10)
+
+## Split data for CV
+folds <- vfold_cv(biketrain, v = 5, repeats = 1)
+
+## Run the CV
+CV_results <- preg_wf %>%
+  tune_grid(resamples = folds, grid = tuning_grid, metrics=metric_set(rmse, mae, rsq))
+
+## Plot Results 
+collect_metrics(CV_results) %>% # Gathers metrics into DF
+filter(.metric=="rmse") %>%
+ggplot(data=., aes(x=penalty, y=mean, color=factor(mixture))) +
+geom_line()
+## Find Best Tuning Parameters
+bestTune <- CV_results %>%
+  select_best("rmse")
+
+preg_model <- linear_reg(penalty=as.numeric(bestTune[1,1]), mixture=as.numeric(bestTune[1,1])) %>% #Set model and tuning
+  set_engine("glmnet") # Function to fit in R
+preg_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(preg_model) %>%
+  fit(data=biketrain)
+bike_predictions_pen <- predict(preg_wf, new_data=biketest)
+
+submission <- bike_predictions_pen %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionpenalized.csv", delim = ",")  
