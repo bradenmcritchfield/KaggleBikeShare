@@ -258,3 +258,45 @@ submission <- bike_predictions_rt %>%
 vroom_write(submission, "submissionregtree.csv", delim = ",")  
 
 
+#################################################################################
+# Random Forests
+#################################################################################
+install.packages("ranger")
+library(tidymodels)
+my_mod <- rand_forest(mtry = tune(),
+                        min_n=tune(),
+                        trees=500) %>% #Type of model
+        set_engine("ranger") %>% # What R function to use
+        set_mode("regression") 
+## Create a workflow with model & recipe
+randfor_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(my_mod)
+## Set up grid of tuning values
+tuning_grid <- grid_regular(mtry(range = c(1,(ncol(biketrain)-1))), min_n(), levels = 5)
+## Set up K-fold CV
+folds <- vfold_cv(biketrain, v = 5, repeats = 1)
+## Find best tuning parameters
+CV_results <- randfor_wf %>%
+  tune_grid(resamples = folds, grid = tuning_grid, metrics=metric_set(rmse, mae, rsq))
+bestTune <- CV_results %>%
+  select_best("rmse")
+## Finalize workflow and predict
+my_mod_official <- rand_forest(mtry = 9,
+                               min_n=2,
+                               trees=500) %>% #Type of model
+  set_engine("ranger") %>% # What R function to use
+  set_mode("regression")
+randfor_wf_official <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(my_mod_official) %>%
+  fit(data=biketrain)
+bike_predictions_rf <- predict(randfor_wf_official, new_data=biketest)
+
+submission <- bike_predictions_rf %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionrandforest.csv", delim = ",")  
