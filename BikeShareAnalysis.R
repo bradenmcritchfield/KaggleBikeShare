@@ -300,3 +300,96 @@ submission <- bike_predictions_rf %>%
   select(2, 3)
 
 vroom_write(submission, "submissionrandforest.csv", delim = ",")  
+
+###################################################################################################
+#Stacking
+###################################################################################################
+library(stacks)
+library(tidyverse)
+library(vroom)
+
+biketrain <- vroom("./train.csv")
+biketest <- vroom("./test.csv")
+
+##Cleaning Step
+biketrain <- biketrain %>%
+  select(1:9, 12) %>%
+  mutate(count = log(count)) #transform count to log scale
+
+#make recipe
+my_recipe <- recipe(count ~ ., biketrain)    %>%
+  #  step_date(datetime, features = "dow") %>% #get day of week
+  step_time(datetime, features = "hour") %>% #get hour
+  step_rm(datetime)%>%
+  step_rm(temp) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors())%>%
+  step_zv(all_predictors())#remove any predictors with no variance
+#prepped_recipe <- prep(my_recipe)      
+#bake(prepped_recipe, new_data = biketrain)
+
+##Split folds
+folds <- vfold_cv(biketrain, v = 5, repeats = 1)
+
+## Create a control grid
+untunedModel <- control_stack_grid()
+tunedModel <- control_stack_resamples()
+
+##Penalized regression model
+preg_model <- linear_reg(penalty=tune(), mixture = tune()) %>%
+  set_engine("glmnet")
+
+  #Set workflow
+    preg_wf <- workflow() %>%
+      add_recipe(my_recipe) %>%
+      add_model(preg_model)
+  #grid of values to tune over
+    preg_tuning_grid <- grid_regular(penalty(), mixture(), levels = 5)
+  #Run the CV
+    preg_models <- preg_wf %>%
+      tune_grid(resamples = folds, grid = preg_tuning_grid, metrics = metric_set(rmse, mae, rsq), control = untunedModel)
+    
+##Libear regression model
+    #library(poissonreg)
+    lin_reg <- linear_reg() %>% #Type of model
+      set_engine("lm") # GLM = generalized linear model 45
+    lin_reg_wf <- workflow() %>%
+      add_recipe(my_recipe) %>%
+      add_model(lin_reg)
+    lin_reg_model <- fit_resamples(
+      lin_reg_wf, resamples = folds, control = tunedModel)
+    
+##Random Forest model
+    rand_for_mod <- rand_forest(mtry = tune(),
+                          min_n=tune(),
+                          trees=500) %>% #Type of model
+      set_engine("ranger") %>% # What R function to use
+      set_mode("regression") 
+    randfor_wf <- workflow() %>%
+      add_recipe(my_recipe) %>%
+      add_model(rand_for_mod)
+    rand_for_tg <- grid_regular(mtry(range = c(1,(ncol(biketrain)-1))), min_n(), levels = 5)
+    rand_for_models <- randfor_wf %>% tune_grid(resamples = folds, grid = rand_for_tg, metrics = metric_set(rmse, mae, rsq), control = untunedModel)
+  
+##Specify models to include
+    my_stack  <- stacks() %>%
+      add_candidates(preg_models) %>%
+      add_candidates(lin_reg_model) %>%
+      add_candidates(rand_for_models)
+    
+##Fit the stacked model
+    stack_mod <- my_stack %>%
+      blend_predictions() %>%
+      fit_members()
+    
+bike_predictions_stacking <- stack_mod %>% 
+      predict(new_data =biketest)
+
+submission <- bike_predictions_stacking %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionstacking.csv", delim = ",") 
