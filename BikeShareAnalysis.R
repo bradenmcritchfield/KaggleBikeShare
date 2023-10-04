@@ -400,7 +400,7 @@ vroom_write(submission, "submissionstacking.csv", delim = ",")
 # BART
 ##################################################################
 my_BART_mod <- bart(mode ="regression",
-                    engine = "dbarts", trees = 20)
+                    engine = "dbarts", trees =20)
 
 BART_wf <- workflow() %>%
   add_recipe(my_recipe) %>%
