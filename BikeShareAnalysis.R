@@ -306,6 +306,7 @@ vroom_write(submission, "submissionrandforest.csv", delim = ",")
 ###################################################################################################
 library(stacks)
 library(tidyverse)
+library(tidymodels)
 library(vroom)
 
 biketrain <- vroom("./train.csv")
@@ -320,6 +321,7 @@ biketrain <- biketrain %>%
 my_recipe <- recipe(count ~ ., biketrain)    %>%
   #  step_date(datetime, features = "dow") %>% #get day of week
   step_time(datetime, features = "hour") %>% #get hour
+  step_date(datetime, features = "year") %>% #get year
   step_rm(datetime)%>%
   step_rm(temp) %>%
   step_mutate(weather = ifelse(weather == 4, 3, weather), weather = as.factor(weather), season = as.factor(season)) %>% #turn weather and season into factors
@@ -374,7 +376,6 @@ preg_model <- linear_reg(penalty=tune(), mixture = tune()) %>%
   
 ##Specify models to include
     my_stack  <- stacks() %>%
-      add_candidates(preg_models) %>%
       add_candidates(lin_reg_model) %>%
       add_candidates(rand_for_models)
     
@@ -393,3 +394,24 @@ submission <- bike_predictions_stacking %>%
   select(2, 3)
 
 vroom_write(submission, "submissionstacking.csv", delim = ",") 
+
+
+##################################################################
+# BART
+##################################################################
+my_BART_mod <- bart(mode ="regression",
+                    engine = "dbarts", trees = 20)
+
+BART_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(my_BART_mod) %>%
+  fit(data=biketrain)
+bike_predictions_rf <- predict(BART_wf, new_data=biketest)
+
+submission <- bike_predictions_rf %>%
+  mutate(datetime = biketest$datetime) %>%
+  mutate(datetime=as.character(format(datetime)))  %>%
+  mutate(count = exp(.pred)) %>% #transform back to original scale
+  select(2, 3)
+
+vroom_write(submission, "submissionBART.csv", delim = ",")  
